@@ -1,6 +1,10 @@
+👉 [Support my work via GitHub Sponsors](https://github.com/sponsors/xenodium)
+
 # emacs-skills
 
 Claude Code skills for Emacs integration.
+
+These skills enable tighter integration with agents running inside Emacs, for example [agent-shell](https://github.com/xenodium/agent-shell).
 
 ## Skills
 
