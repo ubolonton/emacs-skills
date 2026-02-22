@@ -35,6 +35,12 @@ claude plugin marketplace add xenodium/emacs-skills
 claude plugin install emacs-skills@xenodium-emacs-skills
 ```
 
+## Update
+
+```sh
+claude plugin marketplace update xenodium-emacs-skills
+```
+
 ## Uninstall
 
 ```sh
