@@ -11,18 +11,22 @@ Open files from the latest agent interaction in an Emacs dired buffer via `emacs
 - **Same directory**: Opens dired at the parent directory with the relevant files marked, showing them in context alongside sibling files.
 - **Multiple directories**: Creates a curated `*agent-files*` dired buffer containing only the relevant files, using relative paths from a common ancestor.
 
-#### Requirements
+### /open
+
+Open files from the latest agent interaction in Emacs buffers via `emacsclient`. Jumps to a specific line when relevant.
+
+### /select
+
+Open a file in Emacs and select the region most relevant to the current discussion. Ready to act on immediately — narrow, copy, refactor, etc.
+
+### /compile
+
+Run a command in an Emacs `*compilation*` buffer via `emacsclient` instead of in the terminal. Errors and warnings become clickable for easy navigation.
+
+## Requirements
 
 - Emacs running a server (`M-x server-start` or `(server-start)` in your init file)
 - `emacsclient` available on `$PATH`
-
-#### Usage
-
-After an interaction that generates or references files:
-
-```
-/dired
-```
 
 ## Install
 
