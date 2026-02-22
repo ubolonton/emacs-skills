@@ -17,7 +17,7 @@ Open files from the latest agent interaction in Emacs buffers via `emacsclient`.
 
 ### /select
 
-Open a file in Emacs and select the region most relevant to the current discussion. Ready to act on immediately — narrow, copy, refactor, etc.
+Open a file in Emacs and select the region most relevant to the current discussion. Ready to act on immediately: narrow, copy, refactor, etc.
 
 ### /compile
 

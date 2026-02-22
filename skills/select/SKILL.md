@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # Select region in Emacs
 
-Open a file in Emacs and select (activate the region around) the code or text most relevant to the current discussion using `emacsclient --eval`. This allows the user to immediately act on the selection — narrow, copy, refactor, comment, etc.
+Open a file in Emacs and select (activate the region around) the code or text most relevant to the current discussion using `emacsclient --eval`. This allows the user to immediately act on the selection: narrow, copy, refactor, comment, etc.
 
 Determine the relevant file and line range from the most recent interaction context.
 
