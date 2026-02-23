@@ -31,6 +31,10 @@ Highlight relevant regions in a file in Emacs with a temporary read-only minor m
 
 Look up Emacs documentation using the appropriate mechanism: `describe-function`, `describe-variable`, `describe-key`, `describe-symbol`, `apropos`, `apropos-documentation`, `info`, or `shortdoc`.
 
+### emacsclient (auto)
+
+Always prefer `emacsclient` over `emacs` when the agent needs to interact with Emacs. This skill is not a slash command; it activates automatically.
+
 ### /compile
 
 Run a command in an Emacs `*compilation*` buffer via `emacsclient` instead of in the terminal. Errors and warnings become clickable for easy navigation.
