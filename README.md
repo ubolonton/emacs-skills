@@ -35,6 +35,10 @@ Look up Emacs documentation using the appropriate mechanism: `describe-function`
 
 Always prefer `emacsclient` over `emacs` when the agent needs to interact with Emacs. This skill is not a slash command; it activates automatically.
 
+### file-links (auto)
+
+Format file references as markdown links with GitHub-style `#L` line numbers (e.g., `[file.el:42](path/to/file.el#L42)`). Activates automatically.
+
 ## Requirements
 
 - Emacs running a server (`M-x server-start` or `(server-start)` in your init file)
