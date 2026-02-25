@@ -1,4 +1,6 @@
-(require 'cl-lib)
+(eval-when-compile
+  (require 'cl-lib))
+(require 'hi-lock)
 
 (defvar-local agent-skill-highlight--overlays nil)
 (defvar-local agent-skill-highlight--was-read-only nil)
