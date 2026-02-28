@@ -23,129 +23,158 @@ Library source: https://github.com/ubolonton/emacs-module-rs/
 emacs::plugin_is_GPL_compatible!();
 
 // name= sets the Lisp feature name (default: crate name, kebab-cased)
+// name(fn) uses the init function's name instead
 // defun_prefix= decouples the function prefix from the feature name
 // mod_in_name= controls whether Rust module paths appear in Lisp names (default: true)
 // separator= between prefix and function name (default: "-")
 #[emacs::module(name = "my-feature", defun_prefix = "mf", mod_in_name = false)]
 fn init(env: &Env) -> Result<()> {
-    // One-time setup: define errors, set variables, etc.
+    // Runs after all #[defun]s are exported, but before (provide 'feature-name).
+    // Use for one-time setup: set variables, define errors, etc.
     Ok(())
 }
 ```
 
 `#[defun]` functions **auto-register** via `ctor` — no manual registration needed in `init`.
-The `init` hook is for setting variables, calling functions...
-The module is automatically provided. Do not call `env.provide`.
+`(provide 'feature-name)` is called automatically. Do not call `env.provide` manually.
 
 ---
 
 ## Defining Functions
 
 ```rust
-// Basic: no &Env needed if you don't call into Lisp
+// Declare input types directly — prefer this over calling .into_rust() inside the body
 #[defun]
 fn add(x: i64, y: i64) -> Result<i64> {
     Ok(x + y)
 }
 
-// With &Env: needed for calling Lisp, interning symbols, constructing values
+// &Env: needed to call into Lisp, intern symbols, construct values.
+// Unnecessary if you already have a Value parameter (use value.env instead).
 #[defun]
 fn greet(env: &Env, name: String) -> Result<Value<'_>> {
     env.message(&format!("Hello, {}!", name))
 }
 
+// Option<T> maps to nil / T
 #[defun]
 fn maybe_upper(s: Option<String>) -> Result<Option<String>> {
     Ok(s.map(|s| s.to_uppercase()))
 }
+
+// Value parameter: use when conversion can be deferred, or type has no Rust equivalent
+#[defun]
+fn maybe_call(lambda: Value) -> Result<()> {
+    if some_condition() { lambda.call([])?; }
+    Ok(())
+}
 ```
 
-**Naming**: `#[defun]` converts `snake_case` → `kebab-case` automatically.
-Override with `#[defun(name = "custom-lisp-name")]`.
+**Naming**: `snake_case` → `kebab-case` automatically. Full name: `<feature-prefix>[mod-prefix]<base-name>`.
+Override base name: `#[defun(name = "custom-lisp-name")]`.
+Per-function mod path: `#[defun(mod_in_name = true/false)]`.
 
-Per-function `mod_in_name` override: `#[defun(mod_in_name = true/false)]`.
+Docstrings are forwarded to Lisp. The function signature `(fn ARG1 ARG2)` is appended automatically.
 
 ---
 
 ## Type Conversions
 
-**Lisp → Rust**: prefer `value.into_rust::<T>()?` (method form); use `T::from_lisp(value)?` only when it improves clarity.
+**Declare types in `#[defun]` signatures** rather than calling `.into_rust()` / `.into_lisp()` manually — cleaner and less error-prone. Use `.into_rust()` only when conversion needs to be delayed or conditional.
 
-**Rust → Lisp**: types implementing `IntoLisp` convert implicitly as return values or via `.into_lisp(env)?`.
+Built-in `IntoLisp`/`FromLisp`: `i64`, `f64`, `bool`, `String`, `&str`, `Option<T>`, `()` (nil), `Value`, `Vector`.
 
-Built-in `IntoLisp`/`FromLisp` types: `i64`, `f64`, `bool`, `String`, `&str`, `Option<T>`, `Value`, `Vector`.
-
-For structured data, build Lisp values explicitly:
+Constructing structured Lisp values:
 ```rust
-env.cons(key, val)?          // cons cell
-env.list((a, b, c))?         // list from tuple
-env.vector((a, b, c))?       // vector from tuple
+env.cons(key, val)?
+env.list((a, b, c))?          // list from tuple
+env.vector([1, 2, 3])?        // homogeneous array
+env.vector((1, "x", true))?   // heterogeneous tuple
+env.make_vector(5, ())?        // fixed-size, filled with nil
 env.call("plist-get", (plist, env.intern(":key")?))?
 ```
+
+Integer conversion is lossless by default (signals `rust-error` on overflow). Feature `lossy-integer-conversion` disables this.
 
 ---
 
 ## Embedding Rust Data as user-ptr
 
-The GC owns the data; module code gets immutable references back (or mutable via interior mutability).
+The GC owns the boxed value; Rust gets references back. Interior mutability is required for mutation.
 
-### `#[defun(user_ptr)]` — wrap return value automatically
+### `#[defun(user_ptr)]` — RefCell wrapping (default)
 
 ```rust
-// Wraps return value in RefCell<T> (default), suitable for single-threaded mutation
+// Return value is wrapped in Box<RefCell<T>>
 #[defun(user_ptr)]
-fn make_parser() -> Result<Parser> {
-    Ok(Parser::new())
-}
+fn make_parser() -> Result<Parser> { Ok(Parser::new()) }
 
-// Parameter: &mut T borrows the RefCell mutably
+// &mut T borrows the RefCell mutably
 #[defun]
 fn set_language(parser: &mut Parser, lang: Language) -> Result<()> { ... }
 
-// Parameter: &T borrows immutably
+// &T borrows immutably
 #[defun]
 fn get_language(parser: &Parser) -> Result<Option<Language>> { ... }
-
-// Other wrappers: user_ptr(mutex), user_ptr(rwlock), user_ptr(direct)
-// direct: immutable only, no interior mutability
 ```
+
+`&T` / `&mut T` parameters only work for RefCell-embedded values. For `Mutex`/`RwLock` embeddings, take `Value<'_>` and lock manually — locking strategy (deadlock avoidance, etc.) is module-specific:
+
+```rust
+#[defun(user_ptr(rwlock))]
+fn make_map() -> Result<HashMap<String, String>> { Ok(HashMap::new()) }
+
+#[defun]
+fn get_map(v: Value<'_>, key: String) -> Result<Option<String>> {
+    let lock: &RwLock<HashMap<String, String>> = v.into_rust()?;
+    let map = lock.try_read().map_err(|_| Error::msg("map is busy"))?;
+    Ok(map.get(&key).cloned())
+}
+```
+
+Other wrappers: `user_ptr(mutex)`, `user_ptr(direct)` (immutable, no interior mutability).
 
 ### Shared ownership (`Rc<RefCell<T>>`)
 
-When Rust-side objects need to share ownership (e.g., tree nodes referencing their tree):
+When multiple Rust objects share ownership of the same data (e.g., tree nodes holding a reference to their tree):
 
 ```rust
 pub type Shared<T> = Rc<RefCell<T>>;
-// Rc<RefCell<T>> implements Transfer automatically
-// Use as return type directly (implements IntoLisp) or via &Shared<T> parameter
-type Borrowed<'e, T> = &'e Shared<T>;  // parameter alias to avoid #[defun(user_ptr)] confusion
+// Rc<RefCell<T>> has a blanket Transfer impl and implements IntoLisp directly
+
+// Alias avoids confusion: &Shared<T> is recognized as a Transfer ref, not a user_ptr param
+type Borrowed<'e, T> = &'e Shared<T>;
 
 #[defun]
-fn root_node(tree: Borrowed<Tree>) -> Result<Node> { ... }
+fn root_node(tree: Borrowed<Tree>) -> Result<Shared<Node>> { ... }
 ```
 
-Use `Rc<RefCell<T>>` (not `Arc<Mutex<T>>`) when sharing is purely within the Lisp/Emacs thread. Use `Arc<Mutex<T>>` or `Arc<RwLock<T>>` only when background Rust threads also need access.
+Use `Rc<RefCell<T>>` for Emacs-thread-only sharing. Use `Arc<Mutex<T>>` or `Arc<RwLock<T>>` only when background Rust threads also need access.
+
+### Lifetime-constrained types
+
+When a type has a non-`'static` lifetime (e.g., `Node<'tree>`), it cannot be embedded directly. The canonical solution is to use a self-referential struct (e.g., via the `ouroboros` or `self_cell` crate) that bundles the owned parent and the derived reference together.
 
 ---
 
 ## Interning Symbols
 
-**Don't** call `env.intern("symbol-name")` repeatedly at runtime. Cache with `use_symbols!`:
+Don't call `env.intern("symbol-name")` on every invocation — it allocates and traverses the symbol table. Cache with `use_symbols!`:
 
 ```rust
 use_symbols!(nil, t, error, my_custom_symbol);
-// Generates OnceGlobalRef statics initialized at module load.
-// Use as: nil.bind(env), t.bind(env), or pass directly where IntoLisp is expected.
+// Declares OnceGlobalRef statics initialized at module load.
+// Use: nil.bind(env), or pass directly where IntoLisp<'_> is expected.
 ```
 
-For symbols not following the Rust→lisp name conversion, or for Lisp function references:
+For symbols whose names don't follow Rust→lisp conversion, or to cache a function object:
 
 ```rust
 global_refs! { my_registrator(init_to_symbol) =>
     my_sym => "my-lisp-symbol"
 }
 global_refs! { my_fn_registrator(init_to_function) =>
-    list_fn => "list"   // caches the function object, not the symbol
+    list_fn => "list"   // caches the subr, not the symbol
 }
 ```
 
@@ -153,9 +182,9 @@ global_refs! { my_fn_registrator(init_to_function) =>
 
 ## GlobalRef and Value Lifetimes
 
-`Value<'e>` is scoped to the `&'e Env` it came from — cannot escape the function call.
+`Value<'e>` is scoped to its `&'e Env` — cannot escape the function call.
 
-`GlobalRef` escapes the call scope (useful for caching, cross-invocation state):
+`GlobalRef` escapes the call scope (useful for caching values across invocations):
 
 ```rust
 static CACHED: OnceGlobalRef = OnceGlobalRef::new();
@@ -163,61 +192,79 @@ static CACHED: OnceGlobalRef = OnceGlobalRef::new();
 // In init:
 CACHED.init(env, |env| env.intern("my-symbol"))?;
 
-// In defuns:
+// In any defun:
 let val = CACHED.bind(env);   // Value<'_> scoped to current env
 ```
 
-`GlobalRef` is `Send + Sync`, but `.bind(env)` requires holding the Emacs GIL (i.e., being on the Emacs thread with a live `&Env`, or in other words, within a `#[defun]`).
+`GlobalRef` is `Send + Sync`, but `.bind(env)` requires the Emacs GIL (i.e., must be called from within a `#[defun]` or `init`).
 
 ---
 
 ## Error Handling
 
-**Define typed error signals** with `define_errors!` — prefer this over bare `"error"` strings:
+**Define typed error signals** with `define_errors!` — prefer over bare `"error"`:
 
 ```rust
 define_errors! {
     my_error "My module error"
-    my_parse_error "Parse error" (my_error)   // parent hierarchy
+    my_parse_error "Parse error" (my_error)   // inherits from my_error
     my_io_error    "I/O error"   (my_error)
 }
 // Generates OnceGlobalRef statics for each symbol.
 ```
 
-**Signal from Rust**:
+**Signaling**:
 ```rust
-// Using env.signal directly:
 env.signal(my_parse_error, ("details",))?;
 
-// Wrapping foreign errors:
-some_result.or_signal(env, my_io_error)?;  // ResultExt trait
+// Convert a foreign error type into a Lisp signal (ResultExt trait):
+some_result.or_signal(env, my_io_error)?;
 ```
 
-**Propagate Lisp errors**: `?` on `env.call(...)` propagates non-local exits as `ErrorKind::Signal` or `ErrorKind::Throw` — these are re-raised automatically when the `#[defun]` returns.
+**Propagating Lisp errors**: `?` on `env.call(...)` converts non-local exits to `ErrorKind::Signal`/`Throw`, which are re-raised at the `#[defun]` boundary automatically.
+
+**Catching Lisp errors in Rust**:
+```rust
+match env.call("insert", [some_text]) {
+    Err(e) => {
+        if let Some(ErrorKind::Signal { symbol, .. }) = e.downcast_ref() {
+            let sym = unsafe { symbol.value(env) };  // unsafe: must use the same env
+            if sym.eq(env.intern("buffer-read-only")?) {
+                // handle specifically
+                return Ok(());
+            }
+        }
+        Err(e)  // propagate others
+    }
+    v => v,
+}
+```
+
+**Panics**: `catch_unwind` at the Rust-C boundary converts panics to `rust-panic` (not a subtype of `rust-error`). If the panic value is an `ErrorKind`, it propagates as the corresponding signal/throw — useful in FFI callbacks where `Result` can't be returned.
 
 ---
 
 ## Threading
 
-- The Emacs GIL means objects shared only among `#[defun]` don't need to be `Sync`.
-- **Don't block** in `#[defun]` — use queues and return immediately.
+- The Emacs GIL means objects shared only among `#[defun]`s don't need to be `Sync`.
+- **Don't block** in `#[defun]` — stalls the entire Emacs process.
 - Background Rust threads **cannot call into Emacs** (no `&Env` available).
-- To communicate with Emacs from a background thread: write to a shared queue, then use a signalling mechanism (OS signal, channel, file descriptor) to notify Emacs's main thread, which called a pre-registered callback to poll the queue.
+- To communicate from a background thread to Emacs: write to a shared queue, then signal the main thread (SIGUSR1, pipe write, etc.) to call a polling `#[defun]`.
 
 ```rust
-// Push from any thread:
-static CMD_QUEUE: OnceLock<Mutex<VecDeque<Cmd>>> = OnceLock::new();
+static EVENT_QUEUE: OnceLock<Mutex<VecDeque<Event>>> = OnceLock::new();
 
-fn push_cmd(cmd: Cmd) {
-    CMD_QUEUE.get_or_init(Default::default).lock().unwrap().push_back(cmd);
-    // Wake Emacs: raise SIGUSR1, write to a pipe, etc.
+fn push_event(e: Event) {
+    EVENT_QUEUE.get_or_init(Default::default).lock().unwrap().push_back(e);
+    // notify Emacs main thread here
 }
 
-// Poll from Emacs thread:
 #[defun]
-fn poll_events(env: &Env) -> Result<Value<'_>> {
-    let cmd = CMD_QUEUE.get_or_init(Default::default).lock().unwrap().pop_front();
-    // Convert cmd to Lisp value...
+fn poll_event(env: &Env) -> Result<Value<'_>> {
+    match EVENT_QUEUE.get_or_init(Default::default).lock().unwrap().pop_front() {
+        Some(e) => e.into_lisp(env),
+        None => Ok(().into_lisp(env)?),
+    }
 }
 ```
 
@@ -226,8 +273,9 @@ fn poll_events(env: &Env) -> Result<Value<'_>> {
 ## Common Pitfalls
 
 - **Forgetting `plugin_is_GPL_compatible!()`**: module will fail to load.
-- **Calling `env.intern()` in hot paths**: use `use_symbols!` instead.
-- **Using `env.is_not_nil(v)` or `env.eq(a, b)`**: deprecated since 0.10; use `v.is_not_nil()` and `v.eq(other)`.
-- **Leaking `GlobalRef`**: `GlobalRef::free(env)` requires an `&Env`; for long-lived caches use `OnceGlobalRef` (no free needed). Manual `GlobalRef` should be freed explicitly.
-- **`Box<T>` without `Transfer`**: `IntoLisp for Box<T>` requires `T: Transfer`. Implement `Transfer` or use `RefCell<T>`/`Rc<RefCell<T>>` which have blanket impls.
-- **Blocking in `#[defun]`**: stalls the entire Emacs process.
+- **Calling `env.intern()` on every invocation**: use `use_symbols!` instead.
+- **`env.is_not_nil(v)` / `env.eq(a, b)`**: deprecated since 0.10 — use `v.is_not_nil()` and `v.eq(other)`.
+- **`&T` / `&mut T` params for non-RefCell embeddings**: only works with `user_ptr` (RefCell). For Mutex/RwLock, take `Value<'_>` and lock manually.
+- **Leaking `GlobalRef`**: `GlobalRef::free(env)` requires an `&Env` and cannot be called from `Drop`. For long-lived values use `OnceGlobalRef` (leaked intentionally, no free needed). For short-lived ones, free explicitly.
+- **`Box<T>` without `Transfer`**: `IntoLisp for Box<T>` requires `T: Transfer`. Blanket impls exist for `RefCell<T>`, `Mutex<T>`, `RwLock<T>`, `Rc<T>`, `Arc<T>` where `T: 'static`.
+- **Calling `env.provide()`**: unnecessary — `#[module]` calls it automatically.
