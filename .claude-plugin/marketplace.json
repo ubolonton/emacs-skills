@@ -22,7 +22,8 @@
         "./skills/gnuplot",
         "./skills/highlight",
         "./skills/open",
-        "./skills/select"
+        "./skills/select",
+        "./skills/emacs-module-rs"
       ]
     }
   ]
