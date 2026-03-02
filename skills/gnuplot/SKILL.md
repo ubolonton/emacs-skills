@@ -51,7 +51,7 @@ set ytics textcolor rgb FG
 
 - Query the Emacs foreground color once per session and reuse it for all subsequent plots. Only query again if the color is not already known.
 - Always use `pngcairo transparent` terminal for transparent background.
-- Use a unique filename under `/tmp/` (e.g., `/tmp/agent-plot-<timestamp>.png`).
+- Always use a timestamp in the filename (e.g., `/tmp/agent-plot-$(date +%s).png`). Never use descriptive names like `agent-plot-lorenz.png`.
 - Use inline data (`$DATA << EOD ... EOD`) when practical. For large datasets, write a separate data file.
 - After gnuplot runs successfully, output a markdown image (`![description](path)`) on its own line.
 - Choose an appropriate plot type for the data (lines, bars, histogram, scatter, etc.).
