@@ -19,6 +19,7 @@
         "./skills/dired",
         "./skills/emacsclient",
         "./skills/file-links",
+        "./skills/gnuplot",
         "./skills/highlight",
         "./skills/open",
         "./skills/select"
