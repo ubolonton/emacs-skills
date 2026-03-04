@@ -167,16 +167,28 @@ use_symbols!(nil, t, error, my_custom_symbol);
 // Use: nil.bind(env), or pass directly where IntoLisp<'_> is expected.
 ```
 
-For symbols whose names don't follow Rust→lisp conversion, or to cache a function object:
+To cache function objects (subrs), use `use_functions!`:
 
 ```rust
-global_refs! { my_registrator(init_to_symbol) =>
-    my_sym => "my-lisp-symbol"
+use_functions! {
+    list_fn => "list"   // caches the subr, not the symbol; snake_case→kebab-case auto-applied
+    plist_get => "plist-get"
+    length
+    aref
 }
-global_refs! { my_fn_registrator(init_to_function) =>
-    list_fn => "list"   // caches the subr, not the symbol
-}
+// Statics are OnceGlobalRef; call via: list_fn.bind(env).call((a, b, c))?
 ```
+
+## Comparing Values Against Cached Refs
+
+You can compare a `Value` directly against any `OnceGlobalRef` static (from `use_symbols!`, `use_functions!`, or `define_errors!`) without calling `.bind(env)`:
+
+```rust
+if key == *kw_device { ... }
+let focused = val.is_not_nil() && val != *kw_false;
+```
+
+The `*` dereference coerces `OnceGlobalRef` to `GlobalRef`. The comparison delegates to Emacs `eq` internally — no allocation, no intermediate binding needed.
 
 ---
 
@@ -275,6 +287,7 @@ fn poll_event(env: &Env) -> Result<Value<'_>> {
 - **Forgetting `plugin_is_GPL_compatible!()`**: module will fail to load.
 - **Calling `env.intern()` on every invocation**: use `use_symbols!` instead.
 - **`env.is_not_nil(v)` / `env.eq(a, b)`**: deprecated since 0.10 — use `v.is_not_nil()` and `v.eq(other)`.
+- **`v.eq(kw.bind(env))`**: unnecessary — use `v == *kw` when comparing against an `OnceGlobalRef` from `use_symbols!` / `use_functions!` / `define_errors!`.
 - **`&T` / `&mut T` params for non-RefCell embeddings**: only works with `user_ptr` (RefCell). For Mutex/RwLock, take `Value<'_>` and lock manually.
 - **Leaking `GlobalRef`**: `GlobalRef::free(env)` requires an `&Env` and cannot be called from `Drop`. For long-lived values use `OnceGlobalRef` (leaked intentionally, no free needed). For short-lived ones, free explicitly.
 - **`Box<T>` without `Transfer`**: `IntoLisp for Box<T>` requires `T: Transfer`. Blanket impls exist for `RefCell<T>`, `Mutex<T>`, `RwLock<T>`, `Rc<T>`, `Arc<T>` where `T: 'static`.
